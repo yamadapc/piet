@@ -19,3 +19,7 @@ default-members = [
     "piet-web/examples/basic",
     "piet-svg"
 ]
+
+[patch.crates-io]
+pathfinder_geometry = { path = "../pathfinder/geometry" }
+pathfinder_simd = { path = "../pathfinder/simd" }
