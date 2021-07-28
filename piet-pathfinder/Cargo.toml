@@ -1,0 +1,31 @@
+[package]
+name = "piet-pathfinder"
+version = "0.1.0"
+authors = [
+    "Richard Dodd <richard.o.dodd@gmail.com>",
+    "Pedro Yamada <tacla.yamada@gmail.com>"
+]
+description = "Pathfinder backend for piet 2D graphics abstraction."
+license = "MIT/Apache-2.0"
+repository = "https://github.com/linebender/piet"
+readme = "../README.md"
+edition = "2018"
+keywords = ["graphics", "2d"]
+categories = ["rendering::graphics-api", "wasm"]
+
+[dependencies]
+piet = { version = "0.4.0", path = "../piet" }
+pathfinder_renderer = "^0.5.0"
+pathfinder_gl = "^0.5.0"
+pathfinder_canvas = { version = "^0.5.0", features = ["pf-text"], path = "../../pathfinder/canvas" }
+pathfinder_geometry = "^0.5.1"
+pathfinder_color = "^0.5.0"
+pathfinder_resources = "^0.5.0"
+pathfinder_content = "^0.5.0"
+image = "^0.23.14"
+skribo = { version = "^0.2.0", path = "../../skribo" }
+font-kit = "^0.10.1"
+
+[dev-dependencies]
+gl = "0.14"
+glutin = "0.23"
