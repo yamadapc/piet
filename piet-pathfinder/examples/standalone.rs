@@ -23,11 +23,12 @@ use pathfinder_geometry::vector::{vec2f, vec2i};
 use pathfinder_gl::{GLDevice, GLVersion};
 use pathfinder_renderer::concurrent::rayon::RayonExecutor;
 use pathfinder_renderer::concurrent::scene_proxy::SceneProxy;
-use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererOptions};
+use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererOptions, RendererMode, RendererLevel};
 use pathfinder_renderer::gpu::renderer::Renderer;
 use pathfinder_renderer::options::BuildOptions;
 use pathfinder_resources::embedded::EmbeddedResourceLoader;
 use piet::ImageFormat;
+use std::sync::Arc;
 
 fn main() {
     // Calculate the right logical size of the window.
@@ -56,26 +57,30 @@ fn main() {
     let dest = DestFramebuffer::full_window(window_size);
     let options = RendererOptions {
         background_color: Some(ColorF::white()),
+        dest,
         ..RendererOptions::default()
     };
-    let mut renderer = Renderer::new(device, &EmbeddedResourceLoader, dest, options);
+    let mode = RendererMode::default_for_device(&device);
+    let level = RendererLevel::default_for_device(&device);
+    let mut renderer = Renderer::new(device, &EmbeddedResourceLoader, mode, options);
 
     // Make a canvas. We're going to draw a house.
-    let font_source_mem = font_kit::sources::mem::MemSource::empty();
-    let font_source_sys = font_kit::source::SystemSource::new();
-    let font_source =
-        std::sync::Arc::new(font_kit::sources::multi::MultiSource::from_sources(vec![
-            Box::new(font_source_mem),
-            Box::new(font_source_sys),
-        ]));
-    let font_context = CanvasFontContext::new(font_source);
+    // let font_source_mem = font_kit::sources::mem::MemSource::empty();
+    // let font_source_sys = font_kit::source::SystemSource::new();
+    // let font_source =
+    //     std::sync::Arc::new(font_kit::sources::multi::MultiSource::from_sources(vec![
+    //         Box::new(font_source_mem),
+    //         Box::new(font_source_sys),
+    //     ]));
+    let font_source = Arc::new(piet_pathfinder::FontSource::new(vec![Box::new(font_kit::source::SystemSource::new())]));
+    let font_context = CanvasFontContext::new(font_source.clone());
     let mut canvas = Canvas::new(window_size.to_f32()).get_context_2d(font_context);
-    let mut piet_canvas = piet_pathfinder::PathFinderRenderContext::new(&mut canvas);
+    let mut piet_canvas = piet_pathfinder::PathFinderRenderContext::new(&mut canvas, font_source);
     draw_a_house(&mut piet_canvas);
     draw_a_picture(&mut piet_canvas);
 
     // Render the canvas to screen.
-    let scene = SceneProxy::from_scene(canvas.into_canvas().into_scene(), RayonExecutor);
+    let mut scene = SceneProxy::from_scene(canvas.into_canvas().into_scene(), level, RayonExecutor);
     scene.build_and_render(&mut renderer, BuildOptions::default());
     gl_context.swap_buffers().unwrap();
 

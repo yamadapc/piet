@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::ops::RangeBounds;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pathfinder_canvas::{
     CanvasFontContext, ImageSmoothingQuality, Transform2F, Vector2F, Vector2I,
@@ -11,21 +11,28 @@ use pathfinder_renderer::scene::RenderTarget;
 use skribo::FontCollection;
 
 use piet::kurbo::{Affine, Line, PathEl, Point, Rect, Shape, Size};
-use piet::{
-    Color, Error, FixedGradient, FontFamily, HitTestPoint, HitTestPosition, ImageFormat,
-    InterpolationMode, IntoBrush, LineMetric, RenderContext, StrokeStyle, TextAlignment,
-    TextAttribute, TextStorage,
-};
+use piet::{Color, Error, FixedGradient, FontFamily, HitTestPoint, HitTestPosition, ImageFormat, InterpolationMode, IntoBrush, LineMetric, RenderContext, StrokeStyle, TextAlignment, TextAttribute, TextStorage, FontFamilyInner};
+use font_kit::handle::Handle;
+use font_kit::error::{SelectionError, FontLoadingError};
+use font_kit::family_handle::FamilyHandle;
+use std::any::Any;
+use font_kit::family_name::FamilyName;
+use font_kit::properties::Properties;
+use font_kit::source::Source;
 
 static TOLERANCE: f64 = 0.1;
 
 pub struct PathFinderRenderContext<'a> {
     canvas: &'a mut pathfinder_canvas::CanvasRenderingContext2D,
+    text: Text,
 }
 
 impl<'a> PathFinderRenderContext<'a> {
-    pub fn new(canvas: &'a mut pathfinder_canvas::CanvasRenderingContext2D) -> Self {
-        PathFinderRenderContext { canvas }
+    pub fn new(
+        canvas: &'a mut pathfinder_canvas::CanvasRenderingContext2D,
+        font_source: Arc<FontSource>,
+    ) -> Self {
+        PathFinderRenderContext { canvas, text: Text { font_source, } }
     }
 }
 
@@ -47,7 +54,7 @@ impl IntoBrush<PathFinderRenderContext<'_>> for Brush {
 
 #[derive(Clone)]
 pub struct Text {
-    font_context: CanvasFontContext,
+    font_source: Arc<FontSource>,
 }
 
 impl piet::Text for Text {
@@ -55,12 +62,25 @@ impl piet::Text for Text {
     type TextLayout = TextLayout;
 
     fn font_family(&mut self, family_name: &str) -> Option<FontFamily> {
-        // let font = self.font_context.get_font_by_postscript_name(family_name);
-        None
+        let family = self.font_source.select_family_by_name(family_name);
+        family.ok().map(|_family| {
+            FontFamily::new_unchecked(family_name)
+        })
     }
 
     fn load_font(&mut self, data: &[u8]) -> Result<FontFamily, Error> {
-        Err(Error::NotSupported)
+        let font_handle = font_kit::handle::Handle::from_memory(Arc::new(data.to_owned()), 0);
+        let font = self.font_source.in_memory_source.lock().unwrap().add_font(
+            font_handle
+        ).map_err(|err| {
+            match err {
+                FontLoadingError::NoSuchFontInCollection => Error::MissingFont,
+                FontLoadingError::UnknownFormat => Error::FontLoadingFailed,
+                FontLoadingError::Parse => Error::FontLoadingFailed,
+                _ => Error::BackendError(Box::new(err))
+            }
+        })?;
+        Ok(FontFamily::new_unchecked(font.family_name()))
     }
 
     fn new_text_layout(&mut self, text: impl TextStorage) -> Self::TextLayoutBuilder {
@@ -421,4 +441,80 @@ fn rectf_from_rect(rect: Rect) -> pathfinder_geometry::rect::RectF {
     let origin = vec2f_from_point(rect.origin());
     let size = vec2f_from_size(rect.size());
     pathfinder_geometry::rect::RectF::new(origin, size)
+}
+
+pub struct FontSource {
+    in_memory_source: std::sync::Mutex<font_kit::sources::mem::MemSource>,
+    multi_source: font_kit::sources::multi::MultiSource,
+}
+
+impl FontSource {
+    pub fn new(sources: Vec<Box<dyn font_kit::source::Source>>) -> Self {
+        FontSource {
+            multi_source: font_kit::sources::multi::MultiSource::from_sources(sources),
+            in_memory_source: Mutex::new(font_kit::sources::mem::MemSource::empty())
+        }
+    }
+}
+
+impl font_kit::source::Source for FontSource {
+    fn all_fonts(&self) -> Result<Vec<Handle>, SelectionError> {
+        let mut handles = self.multi_source.all_fonts()?;
+        handles.extend(self.in_memory_source.lock().unwrap().all_fonts()?.into_iter());
+        Ok(handles)
+    }
+
+    fn all_families(&self) -> Result<Vec<String>, SelectionError> {
+        let mut handles = self.multi_source.all_families()?;
+        handles.extend(self.in_memory_source.lock().unwrap().all_families()?.into_iter());
+        Ok(handles)
+    }
+
+    fn select_family_by_name(&self, family_name: &str) -> Result<FamilyHandle, SelectionError> {
+        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_family_by_name(family_name) {
+            Ok(handle)
+        } else {
+            self.multi_source.select_family_by_name(family_name)
+        }
+    }
+
+    fn select_by_postscript_name(&self, postscript_name: &str) -> Result<Handle, SelectionError> {
+        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_by_postscript_name(postscript_name) {
+            Ok(handle)
+        } else {
+            self.multi_source.select_by_postscript_name(postscript_name)
+        }
+    }
+
+    fn select_family_by_generic_name(&self, family_name: &FamilyName) -> Result<FamilyHandle, SelectionError> {
+        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_family_by_generic_name(family_name) {
+            Ok(handle)
+        } else {
+            self.multi_source.select_family_by_generic_name(family_name)
+        }
+    }
+
+    fn select_best_match(&self, family_names: &[FamilyName], properties: &Properties) -> Result<Handle, SelectionError> {
+        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_best_match(family_names, properties) {
+            Ok(handle)
+        } else {
+            self.multi_source.select_best_match(family_names, properties)
+        }
+    }
+
+    fn select_descriptions_in_family(&self, family: &FamilyHandle) -> Result<Vec<Properties>, SelectionError> {
+        if let Ok(properties) = self.in_memory_source.lock().unwrap().select_descriptions_in_family(family) {
+            Ok(properties)
+        } else {
+            self.multi_source.select_descriptions_in_family(family)
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mut_any(&mut self) -> &mut dyn Any {
+        self
+    }
 }
