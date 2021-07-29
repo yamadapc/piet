@@ -4,21 +4,26 @@ use std::ops::RangeBounds;
 use std::sync::{Arc, Mutex};
 
 use pathfinder_canvas::{
-    CanvasFontContext, ImageSmoothingQuality, Transform2F, Vector2F, Vector2I,
+    CanvasFontContext, FillStyle, ImageSmoothingQuality, Transform2F, Vector2F, Vector2I,
 };
 use pathfinder_content::pattern::Pattern;
 use pathfinder_renderer::scene::RenderTarget;
 use skribo::FontCollection;
 
-use piet::kurbo::{Affine, Line, PathEl, Point, Rect, Shape, Size};
-use piet::{Color, Error, FixedGradient, FontFamily, HitTestPoint, HitTestPosition, ImageFormat, InterpolationMode, IntoBrush, LineMetric, RenderContext, StrokeStyle, TextAlignment, TextAttribute, TextStorage, FontFamilyInner};
-use font_kit::handle::Handle;
-use font_kit::error::{SelectionError, FontLoadingError};
+use font_kit::error::{FontLoadingError, SelectionError};
 use font_kit::family_handle::FamilyHandle;
-use std::any::Any;
 use font_kit::family_name::FamilyName;
+use font_kit::handle::Handle;
 use font_kit::properties::Properties;
 use font_kit::source::Source;
+use pathfinder_color::ColorU;
+use piet::kurbo::{Affine, Line, PathEl, Point, Rect, Shape, Size};
+use piet::{
+    Color, Error, FixedGradient, FontFamily, FontFamilyInner, HitTestPoint, HitTestPosition,
+    ImageFormat, InterpolationMode, IntoBrush, LineMetric, RenderContext, StrokeStyle,
+    TextAlignment, TextAttribute, TextLayout, TextStorage,
+};
+use std::any::Any;
 
 static TOLERANCE: f64 = 0.1;
 
@@ -32,7 +37,10 @@ impl<'a> PathFinderRenderContext<'a> {
         canvas: &'a mut pathfinder_canvas::CanvasRenderingContext2D,
         font_source: Arc<FontSource>,
     ) -> Self {
-        PathFinderRenderContext { canvas, text: Text { font_source, } }
+        PathFinderRenderContext {
+            canvas,
+            text: Text { font_source },
+        }
     }
 }
 
@@ -59,43 +67,45 @@ pub struct Text {
 
 impl piet::Text for Text {
     type TextLayoutBuilder = TextLayoutBuilder;
-    type TextLayout = TextLayout;
+    type TextLayout = PathfinderTextLayout;
 
     fn font_family(&mut self, family_name: &str) -> Option<FontFamily> {
         let family = self.font_source.select_family_by_name(family_name);
-        family.ok().map(|_family| {
-            FontFamily::new_unchecked(family_name)
-        })
+        family
+            .ok()
+            .map(|_family| FontFamily::new_unchecked(family_name))
     }
 
     fn load_font(&mut self, data: &[u8]) -> Result<FontFamily, Error> {
         let font_handle = font_kit::handle::Handle::from_memory(Arc::new(data.to_owned()), 0);
-        let font = self.font_source.in_memory_source.lock().unwrap().add_font(
-            font_handle
-        ).map_err(|err| {
-            match err {
+        let font = self
+            .font_source
+            .in_memory_source
+            .lock()
+            .unwrap()
+            .add_font(font_handle)
+            .map_err(|err| match err {
                 FontLoadingError::NoSuchFontInCollection => Error::MissingFont,
                 FontLoadingError::UnknownFormat => Error::FontLoadingFailed,
                 FontLoadingError::Parse => Error::FontLoadingFailed,
-                _ => Error::BackendError(Box::new(err))
-            }
-        })?;
+                _ => Error::BackendError(Box::new(err)),
+            })?;
         Ok(FontFamily::new_unchecked(font.family_name()))
     }
 
     fn new_text_layout(&mut self, text: impl TextStorage) -> Self::TextLayoutBuilder {
         TextLayoutBuilder {
-            text: Box::new(text),
+            text: std::rc::Rc::new(text),
         }
     }
 }
 
 pub struct TextLayoutBuilder {
-    text: Box<dyn TextStorage>,
+    text: std::rc::Rc<dyn TextStorage>,
 }
 
 impl piet::TextLayoutBuilder for TextLayoutBuilder {
-    type Out = TextLayout;
+    type Out = PathfinderTextLayout;
 
     fn max_width(self, width: f64) -> Self {
         self
@@ -118,48 +128,63 @@ impl piet::TextLayoutBuilder for TextLayoutBuilder {
     }
 
     fn build(self) -> Result<Self::Out, Error> {
-        Ok(TextLayout {})
+        Ok(PathfinderTextLayout {
+            size: Default::default(),
+            inner: self.text,
+        })
     }
 }
 
 #[derive(Clone)]
-pub struct TextLayout {}
+pub struct PathfinderTextLayout {
+    size: Size,
+    inner: std::rc::Rc<dyn TextStorage>,
+}
 
-impl piet::TextLayout for TextLayout {
+impl TextLayout for PathfinderTextLayout {
     fn size(&self) -> Size {
-        todo!()
+        // todo!()
+        self.size
     }
 
     fn trailing_whitespace_width(&self) -> f64 {
-        todo!()
+        // todo!()
+        0.0
     }
 
     fn image_bounds(&self) -> Rect {
-        todo!()
+        // todo!()
+        Default::default()
     }
 
     fn text(&self) -> &str {
-        todo!()
+        // todo!()
+        self.inner.as_str()
     }
 
     fn line_text(&self, line_number: usize) -> Option<&str> {
-        todo!()
+        // todo!()
+        None
     }
 
     fn line_metric(&self, line_number: usize) -> Option<LineMetric> {
-        todo!()
+        // todo!()
+        None
     }
 
     fn line_count(&self) -> usize {
-        todo!()
+        // todo!()
+        0
     }
 
     fn hit_test_point(&self, point: Point) -> HitTestPoint {
-        todo!()
+        // todo!()
+        HitTestPoint::default()
     }
 
     fn hit_test_text_position(&self, idx: usize) -> HitTestPosition {
-        todo!()
+        // todo!()
+        HitTestPosition::default()
     }
 }
 
@@ -192,7 +217,7 @@ impl pathfinder_canvas::CanvasImageSource for Image {
 impl<'a> RenderContext for PathFinderRenderContext<'a> {
     type Brush = Brush;
     type Text = Text;
-    type TextLayout = TextLayout;
+    type TextLayout = PathfinderTextLayout;
     type Image = Image;
 
     fn status(&mut self) -> Result<(), Error> {
@@ -204,15 +229,27 @@ impl<'a> RenderContext for PathFinderRenderContext<'a> {
     }
 
     fn gradient(&mut self, gradient: impl Into<FixedGradient>) -> Result<Self::Brush, Error> {
-        todo!()
+        let gradient = gradient.into();
+        Ok(Brush::Gradient)
+        // todo!()
     }
 
     fn clear(&mut self, region: impl Into<Option<Rect>>, color: Color) {
-        todo!()
+        let region = region.into();
+        if let Some(rect) = region {
+            self.canvas
+                .set_fill_style(FillStyle::Color(ColorU::from_u32(color.as_rgba_u32())));
+            self.canvas.fill_rect(pathfinder_geometry::rect::RectF::new(
+                vec2f_from_point(rect.origin()),
+                vec2f_from_size(rect.size()),
+            ));
+        } else {
+            self.canvas.clear();
+        }
     }
 
     fn stroke(&mut self, shape: impl Shape, brush: &impl IntoBrush<Self>, width: f64) {
-        // let brush = brush.make_brush(self, || shape.bounding_box());
+        self.set_fill_style(&shape, brush);
         self.canvas.set_line_width(width as f32);
         self.canvas.stroke_path(path2d_from_shape(shape))
     }
@@ -224,11 +261,13 @@ impl<'a> RenderContext for PathFinderRenderContext<'a> {
         width: f64,
         style: &StrokeStyle,
     ) {
-        todo!()
+        self.canvas.set_line_width(width as f32);
+        self.canvas.stroke_path(path2d_from_shape(shape))
+        // todo!()
     }
 
     fn fill(&mut self, shape: impl Shape, brush: &impl IntoBrush<Self>) {
-        // self.canvas.set_fill_style(width as f32);
+        self.set_fill_style(&shape, brush);
         self.canvas.fill_path(
             path2d_from_shape(shape),
             pathfinder_canvas::FillRule::Winding,
@@ -236,6 +275,7 @@ impl<'a> RenderContext for PathFinderRenderContext<'a> {
     }
 
     fn fill_even_odd(&mut self, shape: impl Shape, brush: &impl IntoBrush<Self>) {
+        self.set_fill_style(&shape, brush);
         self.canvas.fill_path(
             path2d_from_shape(shape),
             pathfinder_canvas::FillRule::EvenOdd,
@@ -251,11 +291,14 @@ impl<'a> RenderContext for PathFinderRenderContext<'a> {
 
     fn text(&mut self) -> &mut Self::Text {
         // self.canvas.font()
-        todo!()
+        // todo!()
+        &mut self.text
     }
 
     fn draw_text(&mut self, layout: &Self::TextLayout, pos: impl Into<Point>) {
-        todo!()
+        // todo!()
+        self.canvas
+            .fill_text(layout.text(), vec2f_from_point(pos.into()));
     }
 
     fn save(&mut self) -> Result<(), Error> {
@@ -347,11 +390,12 @@ impl<'a> RenderContext for PathFinderRenderContext<'a> {
         let height = size.height as usize;
         let mut data = vec![0u8; width * height];
         let rect_exp = piet::util::compute_blurred_rect(rect, blur_radius, width, &mut data);
-        let image = Self::Image {
-            inner: image::RgbaImage::from_raw(width as u32, height as u32, data).unwrap(),
-        };
-        self.canvas
-            .draw_image(image, vec2f_from_point(rect_exp.origin()));
+        let maybe_buffer = image::RgbaImage::from_raw(width as u32, height as u32, data);
+        if let Some(buffer) = maybe_buffer {
+            let image = Self::Image { inner: buffer };
+            self.canvas
+                .draw_image(image, vec2f_from_point(rect_exp.origin()));
+        }
     }
 
     fn current_transform(&self) -> Affine {
@@ -452,7 +496,7 @@ impl FontSource {
     pub fn new(sources: Vec<Box<dyn font_kit::source::Source>>) -> Self {
         FontSource {
             multi_source: font_kit::sources::multi::MultiSource::from_sources(sources),
-            in_memory_source: Mutex::new(font_kit::sources::mem::MemSource::empty())
+            in_memory_source: Mutex::new(font_kit::sources::mem::MemSource::empty()),
         }
     }
 }
@@ -460,18 +504,35 @@ impl FontSource {
 impl font_kit::source::Source for FontSource {
     fn all_fonts(&self) -> Result<Vec<Handle>, SelectionError> {
         let mut handles = self.multi_source.all_fonts()?;
-        handles.extend(self.in_memory_source.lock().unwrap().all_fonts()?.into_iter());
+        handles.extend(
+            self.in_memory_source
+                .lock()
+                .unwrap()
+                .all_fonts()?
+                .into_iter(),
+        );
         Ok(handles)
     }
 
     fn all_families(&self) -> Result<Vec<String>, SelectionError> {
         let mut handles = self.multi_source.all_families()?;
-        handles.extend(self.in_memory_source.lock().unwrap().all_families()?.into_iter());
+        handles.extend(
+            self.in_memory_source
+                .lock()
+                .unwrap()
+                .all_families()?
+                .into_iter(),
+        );
         Ok(handles)
     }
 
     fn select_family_by_name(&self, family_name: &str) -> Result<FamilyHandle, SelectionError> {
-        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_family_by_name(family_name) {
+        if let Ok(handle) = self
+            .in_memory_source
+            .lock()
+            .unwrap()
+            .select_family_by_name(family_name)
+        {
             Ok(handle)
         } else {
             self.multi_source.select_family_by_name(family_name)
@@ -479,31 +540,62 @@ impl font_kit::source::Source for FontSource {
     }
 
     fn select_by_postscript_name(&self, postscript_name: &str) -> Result<Handle, SelectionError> {
-        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_by_postscript_name(postscript_name) {
+        if let Ok(handle) = self
+            .in_memory_source
+            .lock()
+            .unwrap()
+            .select_by_postscript_name(postscript_name)
+        {
             Ok(handle)
         } else {
             self.multi_source.select_by_postscript_name(postscript_name)
         }
     }
 
-    fn select_family_by_generic_name(&self, family_name: &FamilyName) -> Result<FamilyHandle, SelectionError> {
-        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_family_by_generic_name(family_name) {
+    fn select_family_by_generic_name(
+        &self,
+        family_name: &FamilyName,
+    ) -> Result<FamilyHandle, SelectionError> {
+        if let Ok(handle) = self
+            .in_memory_source
+            .lock()
+            .unwrap()
+            .select_family_by_generic_name(family_name)
+        {
             Ok(handle)
         } else {
             self.multi_source.select_family_by_generic_name(family_name)
         }
     }
 
-    fn select_best_match(&self, family_names: &[FamilyName], properties: &Properties) -> Result<Handle, SelectionError> {
-        if let Ok(handle) = self.in_memory_source.lock().unwrap().select_best_match(family_names, properties) {
+    fn select_best_match(
+        &self,
+        family_names: &[FamilyName],
+        properties: &Properties,
+    ) -> Result<Handle, SelectionError> {
+        if let Ok(handle) = self
+            .in_memory_source
+            .lock()
+            .unwrap()
+            .select_best_match(family_names, properties)
+        {
             Ok(handle)
         } else {
-            self.multi_source.select_best_match(family_names, properties)
+            self.multi_source
+                .select_best_match(family_names, properties)
         }
     }
 
-    fn select_descriptions_in_family(&self, family: &FamilyHandle) -> Result<Vec<Properties>, SelectionError> {
-        if let Ok(properties) = self.in_memory_source.lock().unwrap().select_descriptions_in_family(family) {
+    fn select_descriptions_in_family(
+        &self,
+        family: &FamilyHandle,
+    ) -> Result<Vec<Properties>, SelectionError> {
+        if let Ok(properties) = self
+            .in_memory_source
+            .lock()
+            .unwrap()
+            .select_descriptions_in_family(family)
+        {
             Ok(properties)
         } else {
             self.multi_source.select_descriptions_in_family(family)
@@ -516,5 +608,17 @@ impl font_kit::source::Source for FontSource {
 
     fn as_mut_any(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+impl<'a> PathFinderRenderContext<'a> {
+    fn set_fill_style(&mut self, shape: &impl Shape, brush: &impl IntoBrush<Self>) {
+        let brush = brush.make_brush(self, || shape.bounding_box());
+        match *brush {
+            Brush::Solid(color) => self
+                .canvas
+                .set_fill_style(FillStyle::Color(ColorU::from_u32(color))),
+            Brush::Gradient => {}
+        }
     }
 }

@@ -28,5 +28,9 @@ skribo = { version = "^0.2", path = "../../skribo" }
 font-kit = "^0.10"
 
 [dev-dependencies]
+pathfinder_gpu = { path = "../../pathfinder/gpu" }
+piet = { version = "^0.4", path = "../piet", features = ["samples"] }
+png = "0.16.2"
 gl = "0.14"
-glutin = "0.23"
+surfman = "^0.4.3"
+euclid = "^0.20"
