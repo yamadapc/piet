@@ -5,23 +5,23 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::sync::Arc;
 
-use surfman::{ContextAttributeFlags, ContextAttributes, SurfaceAccess, SurfaceType};
-use surfman::SystemConnection;
 use gl::types::GLvoid;
+use surfman::SystemConnection;
+use surfman::{ContextAttributeFlags, ContextAttributes, SurfaceAccess, SurfaceType};
 
 use euclid::default::Size2D;
-use pathfinder_canvas::{CanvasFontContext, ColorF, vec2i, vec2f, Transform2F};
+use pathfinder_canvas::{vec2f, vec2i, CanvasFontContext, ColorF, Transform2F};
+use pathfinder_gl::{GLDevice, GLVersion};
+use pathfinder_gpu::Device;
+use pathfinder_renderer::concurrent::rayon::RayonExecutor;
 use pathfinder_renderer::gpu::options::{DestFramebuffer, RendererMode, RendererOptions};
 use pathfinder_renderer::gpu::renderer::Renderer;
 use pathfinder_renderer::options::{BuildOptions, RenderTransform};
 use pathfinder_resources::embedded::EmbeddedResourceLoader;
-use piet::{RenderContext, samples};
 use piet::kurbo::Size;
+use piet::{samples, RenderContext};
 use piet_pathfinder::PathFinderRenderContext;
 use surfman::Connection;
-use pathfinder_gl::{GLDevice, GLVersion};
-use pathfinder_renderer::concurrent::rayon::RayonExecutor;
-use pathfinder_gpu::Device;
 
 const SCALE: f64 = 2.0;
 const FILE_PREFIX: &str = "pathfinder-test-";
@@ -38,11 +38,12 @@ fn run_sample(idx: usize, base_dir: &Path) -> Result<(), Box<dyn std::error::Err
     let path = base_dir.join(file_name);
 
     let mut canvas = pathfinder_canvas::Canvas::new(vec2f(size.width as f32, size.height as f32));
-    let font_source = Arc::new(piet_pathfinder::FontSource::new(vec![Box::new(font_kit::source::SystemSource::new())]));
+    let font_source = Arc::new(piet_pathfinder::FontSource::new(vec![Box::new(
+        font_kit::source::SystemSource::new(),
+    )]));
     let font_context = CanvasFontContext::new(font_source.clone());
     let mut rendering_context = canvas.get_context_2d(font_context);
-    let mut piet_context =
-        PathFinderRenderContext::new(&mut rendering_context, font_source);
+    let mut piet_context = PathFinderRenderContext::new(&mut rendering_context, font_source);
 
     sample.draw(&mut piet_context)?;
 
@@ -78,7 +79,10 @@ fn run_sample(idx: usize, base_dir: &Path) -> Result<(), Box<dyn std::error::Err
     gl::load_with(|symbol_name| device.get_proc_address(&context, symbol_name));
 
     let gl_device = GLDevice::new(GLVersion::GL3, 0);
-    let texture = gl_device.create_texture(pathfinder_gpu::TextureFormat::RGBA8, vec2i(size.width as i32, size.height as i32));
+    let texture = gl_device.create_texture(
+        pathfinder_gpu::TextureFormat::RGBA8,
+        vec2i(size.width as i32, size.height as i32),
+    );
     let framebuffer = gl_device.create_framebuffer(texture);
     let mode = RendererMode::default_for_device(&gl_device);
     let options = RendererOptions {
@@ -87,14 +91,29 @@ fn run_sample(idx: usize, base_dir: &Path) -> Result<(), Box<dyn std::error::Err
         ..RendererOptions::default()
     };
     let mut renderer = Renderer::new(gl_device, &EmbeddedResourceLoader, mode, options);
-    scene.build_and_render(&mut renderer, BuildOptions {
-        transform: RenderTransform::Transform2D(Transform2F::default().scale(vec2f(SCALE as f32, SCALE as f32))),
-        ..BuildOptions::default()
-    }, RayonExecutor);
+    scene.build_and_render(
+        &mut renderer,
+        BuildOptions {
+            transform: RenderTransform::Transform2D(
+                Transform2F::default().scale(vec2f(SCALE as f32, SCALE as f32)),
+            ),
+            ..BuildOptions::default()
+        },
+        RayonExecutor,
+    );
     let mut data: Vec<u8> = vec![0; size.width as usize * size.height as usize * 4];
     unsafe {
-        gl::ReadPixels(0, 0, size.width as i32, size.height as i32, gl::RGBA, gl::UNSIGNED_BYTE, data.as_mut_ptr() as *mut GLvoid);
+        gl::ReadPixels(
+            0,
+            0,
+            size.width as i32,
+            size.height as i32,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            data.as_mut_ptr() as *mut GLvoid,
+        );
     }
+    // data.reverse();
 
     device.destroy_context(&mut context).unwrap();
 
